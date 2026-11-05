@@ -82,9 +82,16 @@ private class PdfFile(context: android.content.Context, uri: Uri) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
     val pageCount: Int get() = renderer.pageCount
+    @Volatile private var priorityPage: Int = -1
+
+    fun prioritize(index: Int) {
+        priorityPage = index
+    }
 
     @Synchronized
-    fun render(index: Int, viewportWidth: Int, viewportHeight: Int): Bitmap {
+    fun render(index: Int, viewportWidth: Int, viewportHeight: Int): Bitmap? {
+        // Drop stale full-size requests waiting behind an in-progress render.
+        if (viewportWidth > 400 && index != priorityPage) return null
         val safeIndex = index.coerceIn(0, renderer.pageCount - 1)
         val page = renderer.openPage(safeIndex)
         try {
@@ -150,7 +157,10 @@ private fun ReaderScreen(uri: Uri) {
     var displayedBitmap by remember(uri) { mutableStateOf<Bitmap?>(null) }
     var showPagePreviews by remember { mutableStateOf(false) }
 
-    LaunchedEffect(uri, page) { prefs.edit().putInt(uri.toString(), page).apply() }
+    LaunchedEffect(uri, page) {
+        pdf.prioritize(page)
+        prefs.edit().putInt(uri.toString(), page).apply()
+    }
     LaunchedEffect(page) {
         zoom = 1f
         panX = 0f
