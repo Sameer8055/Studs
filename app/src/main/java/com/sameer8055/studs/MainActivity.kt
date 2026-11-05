@@ -9,6 +9,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -142,6 +143,9 @@ private fun StudsHome(onPdfSelected: (Uri) -> Unit) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clickable(enabled = selectedPdf != null) {
+                        selectedPdf?.let(onPdfSelected)
+                    }
                     .background(Panel, RoundedCornerShape(22.dp))
                     .border(1.dp, PanelBorder, RoundedCornerShape(22.dp))
                     .padding(20.dp),
@@ -153,7 +157,7 @@ private fun StudsHome(onPdfSelected: (Uri) -> Unit) {
                     Text("Open your first PDF and it will appear here.", color = MutedText, fontSize = 13.sp, lineHeight = 19.sp)
                 } else {
                     Text(selectedName ?: "Selected PDF", color = PrimaryText, fontSize = 17.sp, fontWeight = FontWeight.Medium)
-                    Text("Ready to open · Reader screen is the next build step", color = MutedText, fontSize = 12.sp)
+                    Text("Tap to continue where you left off", color = MutedText, fontSize = 12.sp)
                 }
             }
 
