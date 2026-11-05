@@ -19,6 +19,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -389,6 +390,7 @@ private fun FolderCard(name: String, count: Int, onClick: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DocumentCard(entry: PdfEntry, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
