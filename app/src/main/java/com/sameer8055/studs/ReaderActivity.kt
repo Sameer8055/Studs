@@ -52,7 +52,7 @@ private val ReaderInk = Color(0xFFF4F4F4)
 private val ReaderMuted = Color(0xFF858585)
 
 class ReaderActivity : ComponentActivity() {
-    private var volumePageHandler: ((Int) -> Unit)? = null
+    var volumePageHandler: ((Int) -> Unit)? = null
 
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
         when (keyCode) {
