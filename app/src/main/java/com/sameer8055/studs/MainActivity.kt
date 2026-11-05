@@ -23,6 +23,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -89,7 +91,7 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
             }
         }.getOrDefault(emptyList()))
     }
-    var folders by remember { mutableStateOf(prefs.getStringSet("folders", emptySet())?.toList()?.sorted() ?: emptyList()) }
+    var folders by remember { mutableStateOf<List<String>>(prefs.getStringSet("folders", emptySet<String>())?.toList()?.sorted() ?: emptyList()) }
     var activeFolder by remember { mutableStateOf<String?>(null) }
     var showFolderDialog by remember { mutableStateOf(false) }
     var folderName by remember { mutableStateOf("") }
@@ -113,7 +115,7 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
         }
     }
 
-    val visibleFolders = if (activeFolder == null) folders else emptyList()
+    val visibleFolders: List<String> = if (activeFolder == null) folders else emptyList()
     val visiblePdfs = pdfs.filter { it.folder == activeFolder.orEmpty() }
 
     Surface(Modifier.fillMaxSize(), color = OledBlack) {
