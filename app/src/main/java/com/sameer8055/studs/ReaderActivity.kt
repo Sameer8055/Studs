@@ -11,31 +11,18 @@ import android.os.ParcelFileDescriptor
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -53,13 +40,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
-import kotlin.math.roundToInt
 
 private val ReaderBlack = Color(0xFF000000)
 private val ReaderPanel = Color(0xFF111111)
@@ -68,6 +53,16 @@ private val ReaderInk = Color(0xFFF4F4F4)
 private val ReaderMuted = Color(0xFF858585)
 
 class ReaderActivity : ComponentActivity() {
+    private var volumePageHandler: ((Int) -> Unit)? = null
+
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        when (keyCode) {
+            android.view.KeyEvent.KEYCODE_VOLUME_DOWN -> { volumePageHandler?.invoke(1); return true }
+            android.view.KeyEvent.KEYCODE_VOLUME_UP -> { volumePageHandler?.invoke(-1); return true }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -142,22 +137,7 @@ private class PdfFile(context: android.content.Context, uri: Uri) {
 @Composable
 private fun ReaderScreen(uri: Uri, documentName: String) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     var activeUri by remember(uri) { mutableStateOf(uri) }
-    var selectedPages by remember { mutableStateOf<Set<Int>>(emptySet()) }
-    var moveTarget by remember { mutableStateOf("") }
-    var showMoveDialog by remember { mutableStateOf(false) }
-    var editing by remember { mutableStateOf(false) }
-    var editError by remember { mutableStateOf<String?>(null) }
-    val appendPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { selected ->
-        if (selected != null) scope.launch {
-            editing = true
-            runCatching { PdfEditor.edit(context, activeUri, appendUri = selected) }
-                .onSuccess { activeUri = it; selectedPages = emptySet() }
-                .onFailure { editError = it.message ?: "Could not append that PDF." }
-            editing = false
-        }
-    }
     val opened = remember(activeUri) { runCatching { PdfFile(context, activeUri) } }
     DisposableEffect(opened) { onDispose { opened.getOrNull()?.close() } }
     if (opened.isFailure) {
@@ -178,23 +158,18 @@ private fun ReaderScreen(uri: Uri, documentName: String) {
 
     val prefs = remember { context.getSharedPreferences("studs_reading_positions", 0) }
     var page by remember(activeUri) { mutableIntStateOf(prefs.getInt(activeUri.toString(), 0).coerceIn(0, pdf.pageCount - 1)) }
+    DisposableEffect(Unit) {
+        (context as? ReaderActivity)?.volumePageHandler = { direction ->
+            page = (page + direction).coerceIn(0, pdf.pageCount - 1)
+        }
+        onDispose { (context as? ReaderActivity)?.volumePageHandler = null }
+    }
     var zoom by remember(uri) { mutableFloatStateOf(1f) }
     var panX by remember(uri) { mutableFloatStateOf(0f) }
     var panY by remember(uri) { mutableFloatStateOf(0f) }
     var swipeDistance by remember(uri) { mutableFloatStateOf(0f) }
     var displayedPage by remember(activeUri) { mutableIntStateOf(-1) }
     var displayedBitmap by remember(activeUri) { mutableStateOf<Bitmap?>(null) }
-    var showPagePreviews by remember { mutableStateOf(false) }
-
-    fun applyPageEdits(delete: Set<Int> = emptySet(), moveFrom: Int? = null, moveTo: Int? = null) {
-        scope.launch {
-            editing = true
-            runCatching { PdfEditor.edit(context, activeUri, deletePages = delete, moveFrom = moveFrom, moveTo = moveTo) }
-                .onSuccess { activeUri = it; selectedPages = emptySet(); showPagePreviews = true }
-                .onFailure { editError = it.message ?: "Could not edit this PDF." }
-            editing = false
-        }
-    }
 
     LaunchedEffect(activeUri, page) {
         pdf.prioritize(page)
@@ -215,7 +190,6 @@ private fun ReaderScreen(uri: Uri, documentName: String) {
 
             LaunchedEffect(activeUri, page, viewportWidth, viewportHeight) {
                 // Coalesce quick taps: render the latest requested page, not every skipped page.
-                delay(16)
                 val requestedPage = page
                 val rendered = withContext(Dispatchers.IO) {
                     runCatching { pdf.render(requestedPage, viewportWidth, viewportHeight) }.getOrNull()
@@ -250,10 +224,10 @@ private fun ReaderScreen(uri: Uri, documentName: String) {
                             swipeDistance = 0f
                         } else {
                             swipeDistance += pan.x
-                            if (swipeDistance <= -58f && page < pdf.pageCount - 1) {
+                            if (swipeDistance <= -36f && page < pdf.pageCount - 1) {
                                 page = (page + 1).coerceAtMost(pdf.pageCount - 1)
                                 swipeDistance = 0f
-                            } else if (swipeDistance >= 58f && page > 0) {
+                            } else if (swipeDistance >= 36f && page > 0) {
                                 page = (page - 1).coerceAtLeast(0)
                                 swipeDistance = 0f
                             }
@@ -276,65 +250,11 @@ private fun ReaderScreen(uri: Uri, documentName: String) {
                 }
             }
 
-            AnimatedVisibility(
-                visible = showPagePreviews,
-                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(0.78f).padding(end = 12.dp),
-                enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(tween(180)),
-                exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(tween(140))
-            ) {
-                Column(
-                    Modifier.width(158.dp).fillMaxHeight().clip(RoundedCornerShape(20.dp))
-                        .background(Color(0xF20D0D0D)).border(1.dp, ReaderBorder, RoundedCornerShape(20.dp))
-                        .padding(horizontal = 10.dp, vertical = 12.dp)
-                ) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        if (selectedPages.isNotEmpty()) Text("${selectedPages.size} SELECTED", color = ReaderMuted, fontSize = 9.sp, letterSpacing = 1.2.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)) else Spacer(Modifier.weight(1f))
-                        Box(Modifier.size(30.dp).clip(CircleShape).clickable { appendPicker.launch(arrayOf("application/pdf")) }, contentAlignment = Alignment.Center) { Text("＋", color = ReaderInk, fontSize = 22.sp) }
-                    }
-                    if (selectedPages.isNotEmpty()) {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = { applyPageEdits(delete = selectedPages) }, enabled = selectedPages.size < pdf.pageCount) { Text("Delete", color = Color(0xFFFF8C8C), fontSize = 10.sp) }
-                            TextButton(onClick = { moveTarget = (selectedPages.singleOrNull()?.plus(1) ?: 1).toString(); showMoveDialog = true }, enabled = selectedPages.size == 1) { Text("Move", color = Color(0xFFC4CEFF), fontSize = 10.sp) }
-                            TextButton(onClick = { selectedPages = emptySet() }) { Text("Clear", color = ReaderMuted, fontSize = 10.sp) }
-                        }
-                    }
-                    if (editing) Text("Updating PDF…", color = Color(0xFFC4CEFF), fontSize = 10.sp)
-                    Spacer(Modifier.height(6.dp))
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(11.dp),
-                        contentPadding = PaddingValues(bottom = 8.dp)
-                    ) {
-                        items((0 until pdf.pageCount).toList(), key = { it }) { index ->
-                            PagePreviewItem(
-                                pdf = pdf,
-                                index = index,
-                                selected = index == page,
-                                checked = index in selectedPages,
-                                onClick = {
-                                    if (selectedPages.isNotEmpty()) selectedPages = if (index in selectedPages) selectedPages - index else selectedPages + index
-                                    else { page = index; showPagePreviews = false }
-                                },
-                                onLongClick = { selectedPages = selectedPages + index },
-                                onMove = { from, to -> applyPageEdits(moveFrom = from, moveTo = to) }
-                            )
-                        }
-                    }
-                }
-            }
-
             Row(
                 Modifier.align(Alignment.BottomEnd).padding(end = 18.dp, bottom = 34.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(7.dp)
             ) {
-                Box(
-                    Modifier.size(46.dp).clip(CircleShape).background(ReaderPanel.copy(alpha = 0.96f))
-                        .border(1.dp, ReaderBorder, CircleShape).clickable { showPagePreviews = !showPagePreviews },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text("▦", color = if (showPagePreviews) Color(0xFFC4CEFF) else ReaderInk, fontSize = 21.sp)
-                }
                 Row(
                     Modifier.clip(RoundedCornerShape(28.dp)).background(ReaderPanel.copy(alpha = 0.96f))
                         .border(1.dp, ReaderBorder, RoundedCornerShape(28.dp)).padding(5.dp),
@@ -348,64 +268,8 @@ private fun ReaderScreen(uri: Uri, documentName: String) {
             }
         }
     }
-    if (showMoveDialog) AlertDialog(
-        onDismissRequest = { showMoveDialog = false }, containerColor = ReaderPanel,
-        title = { Text("Move page", color = ReaderInk) },
-        text = { OutlinedTextField(value = moveTarget, onValueChange = { moveTarget = it.filter(Char::isDigit) }, singleLine = true, label = { Text("New position (1–${pdf.pageCount})") }) },
-        confirmButton = { TextButton(onClick = {
-            val from = selectedPages.singleOrNull(); val target = moveTarget.toIntOrNull()?.minus(1)
-            if (from != null && target != null) applyPageEdits(moveFrom = from, moveTo = target)
-            showMoveDialog = false
-        }) { Text("Move", color = Color(0xFFC4CEFF)) } },
-        dismissButton = { TextButton(onClick = { showMoveDialog = false }) { Text("Cancel", color = ReaderMuted) } }
-    )
-    if (editError != null) AlertDialog(onDismissRequest = { editError = null }, containerColor = ReaderPanel,
-        title = { Text("PDF update failed", color = ReaderInk) }, text = { Text(editError.orEmpty(), color = ReaderMuted) },
-        confirmButton = { TextButton(onClick = { editError = null }) { Text("OK", color = Color(0xFFC4CEFF)) } })
 
-}
 
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun PagePreviewItem(pdf: PdfFile, index: Int, selected: Boolean, checked: Boolean, onClick: () -> Unit, onLongClick: () -> Unit, onMove: (Int, Int) -> Unit) {
-    val pageDensity = LocalDensity.current
-    val bitmap by produceState<Bitmap?>(initialValue = null, key1 = pdf, key2 = index) {
-        value = withContext(Dispatchers.IO) {
-            runCatching { pdf.render(index, 260, 340) }.getOrNull()
-        }
-    }
-    Column(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-            .background(if (checked) Color(0xFF292A38) else Color.Transparent)
-            .border(if (checked || selected) 1.dp else 0.dp, if (checked || selected) Color(0xFFC4CEFF) else Color.Transparent, RoundedCornerShape(10.dp))
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .pointerInput(index, pdf.pageCount) {
-                var dragDistance = 0f
-                detectDragGesturesAfterLongPress(
-                    onDragStart = { dragDistance = 0f },
-                    onDragEnd = {
-                        val steps = (dragDistance / with(pageDensity) { 150.dp.toPx() }).roundToInt()
-                        if (steps != 0) onMove(index, (index + steps).coerceIn(0, pdf.pageCount - 1))
-                    },
-                    onDragCancel = { dragDistance = 0f },
-                    onDrag = { change, amount -> dragDistance += amount.y; change.consume() }
-                )
-            }.padding(7.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Box(
-            Modifier.fillMaxWidth().height(112.dp).clip(RoundedCornerShape(5.dp)).background(Color(0xFF222222)),
-            contentAlignment = Alignment.Center
-        ) {
-            if (bitmap != null) {
-                Image(bitmap = bitmap!!.asImageBitmap(), contentDescription = "Page ${index + 1}", modifier = Modifier.fillMaxHeight().fillMaxWidth(0.82f), contentScale = ContentScale.Fit)
-            } else {
-                Text("…", color = ReaderMuted, fontSize = 20.sp)
-            }
-        }
-        Spacer(Modifier.height(5.dp))
-        Text("${index + 1}", color = if (checked || selected) Color(0xFFC4CEFF) else ReaderMuted, fontSize = 10.sp, fontWeight = if (checked || selected) FontWeight.SemiBold else FontWeight.Normal)
-    }
 }
 
 @Composable
