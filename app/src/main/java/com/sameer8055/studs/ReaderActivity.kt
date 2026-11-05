@@ -62,8 +62,8 @@ private class PdfFile(context: android.content.Context, uri: Uri) {
     private val descriptor: ParcelFileDescriptor =
         requireNotNull(context.contentResolver.openFileDescriptor(uri, "r"))
     private val renderer = PdfRenderer(descriptor)
-    private val cache = android.util.LruCache<String, Bitmap>(24 * 1024 * 1024) {
-        it.byteCount
+    private val cache = object : android.util.LruCache<String, Bitmap>(24 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
     val pageCount get() = renderer.pageCount
 
