@@ -191,9 +191,9 @@ private fun ReaderScreen(uri: Uri, documentName: String) {
         }
     }
 
-    LaunchedEffect(uri, page) {
+    LaunchedEffect(activeUri, page) {
         pdf.prioritize(page)
-        prefs.edit().putInt(uri.toString(), page).apply()
+        prefs.edit().putInt(activeUri.toString(), page).apply()
     }
     LaunchedEffect(page) {
         zoom = 1f
@@ -283,7 +283,7 @@ private fun ReaderScreen(uri: Uri, documentName: String) {
                         .padding(horizontal = 10.dp, vertical = 12.dp)
                 ) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (selectedPages.isEmpty()) "PAGES" else "${selectedPages.size} SELECTED", color = ReaderMuted, fontSize = 9.sp, letterSpacing = 1.2.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        if (selectedPages.isNotEmpty()) Text("${selectedPages.size} SELECTED", color = ReaderMuted, fontSize = 9.sp, letterSpacing = 1.2.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f)) else Spacer(Modifier.weight(1f))
                         Box(Modifier.size(30.dp).clip(CircleShape).clickable { appendPicker.launch(arrayOf("application/pdf")) }, contentAlignment = Alignment.Center) { Text("＋", color = ReaderInk, fontSize = 22.sp) }
                     }
                     if (selectedPages.isNotEmpty()) {
