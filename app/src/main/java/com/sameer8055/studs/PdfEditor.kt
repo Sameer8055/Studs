@@ -22,7 +22,7 @@ object PdfEditor {
     ): Uri = withContext(Dispatchers.IO) {
         PDFBoxResourceLoader.init(context)
         val input = copyUriToCache(context, sourceUri, "source")
-        val output = File(context.filesDir, "edited_pdfs/\u0024{UUID.randomUUID()}.pdf")
+        val output = File(context.filesDir, "edited_pdfs/" + UUID.randomUUID() + ".pdf")
         output.parentFile?.mkdirs()
         PDDocument.load(input).use { document ->
             require(document.numberOfPages > 0) { "This PDF has no pages." }
@@ -58,7 +58,7 @@ object PdfEditor {
     }
 
     private fun copyUriToCache(context: Context, uri: Uri, prefix: String): File {
-        val file = File(context.cacheDir, "\u0024{prefix}-\u0024{UUID.randomUUID()}.pdf")
+        val file = File(context.cacheDir, prefix + "-" + UUID.randomUUID() + ".pdf")
         if (uri.scheme == "file") {
             File(requireNotNull(uri.path)).copyTo(file, overwrite = true)
         } else {
