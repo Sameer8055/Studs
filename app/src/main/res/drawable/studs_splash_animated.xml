@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android" android:drawable="@drawable/studs_logo_vector">
+    <target android:name="logo_group" android:animation="@animator/studs_logo_scale"/>
+    <target android:name="logo_path" android:animation="@animator/studs_logo_alpha"/>
+</animated-vector>

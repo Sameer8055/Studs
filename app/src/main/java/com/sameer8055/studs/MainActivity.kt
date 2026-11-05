@@ -7,6 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,24 +26,31 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.documentfile.provider.DocumentFile
 import org.json.JSONObject
 
 private val OledBlack = Color(0xFF000000)
-private val Tile = Color(0xFF111111)
-private val TileBorder = Color(0xFF242424)
+private val CardBlack = Color(0xFF0D0D0D)
+private val PreviewBlack = Color(0xFF171717)
+private val Hairline = Color(0xFF252525)
 private val MainText = Color(0xFFF4F4F4)
 private val SubText = Color(0xFF858585)
-private val Accent = Color(0xFFB8C7FF)
+private val Accent = Color(0xFFC4CEFF)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
+        window.statusBarColor = android.graphics.Color.BLACK
+        window.navigationBarColor = android.graphics.Color.BLACK
         setContent {
             MaterialTheme {
                 StudsHome(
@@ -81,7 +89,7 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
             }
         }.getOrDefault(emptyList()))
     }
-    var folders by remember { mutableStateOf<List<String>>(prefs.getStringSet("folders", emptySet())?.toList()?.sorted() ?: emptyList()) }
+    var folders by remember { mutableStateOf(prefs.getStringSet("folders", emptySet())?.toList()?.sorted() ?: emptyList()) }
     var activeFolder by remember { mutableStateOf<String?>(null) }
     var showFolderDialog by remember { mutableStateOf(false) }
     var folderName by remember { mutableStateOf("") }
@@ -100,91 +108,107 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
         if (uri != null) {
             val name = runCatching { DocumentFile.fromSingleUri(context, uri)?.name }.getOrNull() ?: "PDF document"
             val entry = PdfEntry(uri.toString(), name, activeFolder.orEmpty())
-            saveLibrary((pdfs.filterNot { it.uri == entry.uri } + entry), folders)
+            saveLibrary(pdfs.filterNot { it.uri == entry.uri } + entry, folders)
             onOpenPdf(uri, name)
         }
     }
 
+    val visibleFolders = if (activeFolder == null) folders else emptyList()
+    val visiblePdfs = pdfs.filter { it.folder == activeFolder.orEmpty() }
+
     Surface(Modifier.fillMaxSize(), color = OledBlack) {
-        Column(Modifier.fillMaxSize().background(OledBlack).padding(horizontal = 18.dp, vertical = 12.dp)) {
-            Row(Modifier.fillMaxWidth().height(54.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(
+            Modifier.fillMaxSize().background(OledBlack)
+                .statusBarsPadding()
+                .padding(horizontal = 20.dp)
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 26.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.studs_logo),
+                    contentDescription = "Studs logo",
+                    modifier = Modifier.size(38.dp).clip(RoundedCornerShape(11.dp))
+                )
+                Spacer(Modifier.width(11.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("STUDS", color = MainText, fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
+                    Text("PDF READER", color = SubText, fontSize = 9.sp, letterSpacing = 2.sp)
+                }
                 if (activeFolder != null) {
-                    Box(
-                        Modifier.size(38.dp).clip(RoundedCornerShape(13.dp)).background(Tile)
-                            .clickable { activeFolder = null },
-                        contentAlignment = Alignment.Center
-                    ) { Text("‹", color = MainText, fontSize = 25.sp) }
-                    Text(activeFolder ?: "", Modifier.weight(1f).padding(start = 10.dp), color = MainText, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                } else {
-                    Column(Modifier.weight(1f)) {
-                        Text("STUDS", color = MainText, fontSize = 17.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
-                        Text("LIBRARY", color = SubText, fontSize = 9.sp, letterSpacing = 2.sp)
+                    TextButton(onClick = { activeFolder = null }) {
+                        Text("All files", color = Accent, fontSize = 12.sp)
                     }
                 }
-                Box(
-                    Modifier.clip(RoundedCornerShape(13.dp)).background(Tile).border(1.dp, TileBorder, RoundedCornerShape(13.dp))
-                        .clickable { picker.launch(arrayOf("application/pdf")) }.padding(horizontal = 13.dp, vertical = 10.dp),
-                    contentAlignment = Alignment.Center
-                ) { Text("＋ Import PDF", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
-                Spacer(Modifier.width(8.dp))
-                Box(
-                    Modifier.size(40.dp).clip(RoundedCornerShape(13.dp)).background(Tile).border(1.dp, TileBorder, RoundedCornerShape(13.dp))
-                        .clickable { folderName = ""; showFolderDialog = true },
-                    contentAlignment = Alignment.Center
-                ) { Text("＋", color = MainText, fontSize = 23.sp) }
             }
 
-            Spacer(Modifier.height(12.dp))
-            val visibleFolders = if (activeFolder == null) folders else emptyList()
-            val visiblePdfs = pdfs.filter { it.folder == activeFolder.orEmpty() }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        activeFolder ?: "Your library",
+                        color = MainText,
+                        fontSize = 27.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = (-0.6).sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        if (activeFolder == null) "${pdfs.size} documents  ·  ${folders.size} folders"
+                        else "${visiblePdfs.size} documents",
+                        color = SubText,
+                        fontSize = 11.sp
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(
+                        Modifier.clip(RoundedCornerShape(13.dp))
+                            .background(Color(0xFF171717))
+                            .border(1.dp, Hairline, RoundedCornerShape(13.dp))
+                            .clickable { picker.launch(arrayOf("application/pdf")) }
+                            .padding(horizontal = 13.dp, vertical = 11.dp)
+                    ) {
+                        Text("＋ Import", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    Box(
+                        Modifier.size(42.dp).clip(RoundedCornerShape(13.dp))
+                            .background(CardBlack).border(1.dp, Hairline, RoundedCornerShape(13.dp))
+                            .clickable { folderName = ""; showFolderDialog = true },
+                        contentAlignment = Alignment.Center
+                    ) { Text("＋", color = MainText, fontSize = 23.sp) }
+                }
+            }
 
+            Spacer(Modifier.height(20.dp))
             if (visibleFolders.isEmpty() && visiblePdfs.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("▤", color = SubText, fontSize = 42.sp)
-                        Spacer(Modifier.height(12.dp))
-                        Text(if (activeFolder == null) "Your library is empty" else "This folder is empty", color = MainText, fontSize = 17.sp, fontWeight = FontWeight.Medium)
-                        Spacer(Modifier.height(5.dp))
-                        Text("Import a PDF to see it here", color = SubText, fontSize = 12.sp)
+                        Image(
+                            painter = painterResource(R.drawable.studs_logo),
+                            contentDescription = null,
+                            modifier = Modifier.size(72.dp).clip(RoundedCornerShape(20.dp))
+                        )
+                        Spacer(Modifier.height(20.dp))
+                        Text(if (activeFolder == null) "A clear space for your PDFs" else "Nothing here yet", color = MainText, fontSize = 17.sp, fontWeight = FontWeight.Medium)
+                        Spacer(Modifier.height(7.dp))
+                        Text("Your documents will appear here", color = SubText, fontSize = 12.sp)
                     }
                 }
             } else {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 142.dp),
+                    columns = GridCells.Adaptive(minSize = 148.dp),
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 24.dp),
+                    contentPadding = PaddingValues(bottom = 28.dp, top = 2.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     items(visibleFolders, key = { "folder:$it" }) { folder ->
-                        Column(
-                            Modifier.fillMaxWidth().height(142.dp).clip(RoundedCornerShape(18.dp))
-                                .background(Tile).border(1.dp, TileBorder, RoundedCornerShape(18.dp))
-                                .clickable { activeFolder = folder }.padding(14.dp),
-                            verticalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("▰", color = Accent, fontSize = 30.sp)
-                            Column {
-                                Text(folder, color = MainText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("${pdfs.count { it.folder == folder }} PDFs", color = SubText, fontSize = 10.sp)
-                            }
-                        }
+                        FolderCard(folder, pdfs.count { it.folder == folder }) { activeFolder = folder }
                     }
                     items(visiblePdfs, key = { "pdf:${it.uri}" }) { entry ->
-                        Column(
-                            Modifier.fillMaxWidth().height(176.dp).clip(RoundedCornerShape(18.dp))
-                                .background(Tile).border(1.dp, TileBorder, RoundedCornerShape(18.dp))
-                                .clickable { onOpenPdf(Uri.parse(entry.uri), entry.name) }.padding(14.dp),
-                            verticalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Box(
-                                Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(11.dp)).background(Color(0xFF1A1A1A)),
-                                contentAlignment = Alignment.Center
-                            ) { Text("PDF", color = Accent, fontSize = 23.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp) }
-                            Spacer(Modifier.height(10.dp))
-                            Text(entry.name, color = MainText, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp)
-                            Text("PDF DOCUMENT", color = SubText, fontSize = 8.sp, letterSpacing = 1.2.sp)
-                        }
+                        DocumentCard(entry.name) { onOpenPdf(Uri.parse(entry.uri), entry.name) }
                     }
                 }
             }
@@ -194,7 +218,7 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
     if (showFolderDialog) {
         AlertDialog(
             onDismissRequest = { showFolderDialog = false },
-            containerColor = Tile,
+            containerColor = CardBlack,
             title = { Text("Create folder", color = MainText) },
             text = {
                 OutlinedTextField(
@@ -213,5 +237,67 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
             },
             dismissButton = { TextButton(onClick = { showFolderDialog = false }) { Text("Cancel", color = SubText) } }
         )
+    }
+}
+
+@Composable
+private fun FolderCard(name: String, count: Int, onClick: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().height(154.dp).clip(RoundedCornerShape(19.dp))
+            .background(CardBlack).border(1.dp, Hairline, RoundedCornerShape(19.dp))
+            .clickable(onClick = onClick).padding(14.dp),
+        verticalArrangement = Arrangement.SpaceBetween
+    ) {
+        Box(
+            Modifier.fillMaxWidth().height(82.dp).clip(RoundedCornerShape(13.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFF20202A), Color(0xFF111116)))),
+            contentAlignment = Alignment.Center
+        ) { Text("▰", color = Accent, fontSize = 34.sp) }
+        Column {
+            Text(name, color = MainText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(3.dp))
+            Text("$count PDFs", color = SubText, fontSize = 10.sp)
+        }
+    }
+}
+
+@Composable
+private fun DocumentCard(name: String, onClick: () -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().height(190.dp).clip(RoundedCornerShape(19.dp))
+            .background(CardBlack).border(1.dp, Hairline, RoundedCornerShape(19.dp))
+            .clickable(onClick = onClick).padding(11.dp)
+    ) {
+        Box(
+            Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(13.dp))
+                .background(Brush.verticalGradient(listOf(Color(0xFF202020), PreviewBlack))),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                Modifier.fillMaxHeight().fillMaxWidth(0.72f)
+                    .clip(RoundedCornerShape(4.dp)).background(Color(0xFFE8E8E8))
+                    .padding(horizontal = 13.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.Top
+            ) {
+                Box(Modifier.fillMaxWidth(0.42f).height(4.dp).background(Color(0xFF6C789D), RoundedCornerShape(4.dp)))
+                Spacer(Modifier.height(10.dp))
+                repeat(5) { index ->
+                    Box(
+                        Modifier.fillMaxWidth(if (index == 3) 0.68f else 0.94f)
+                            .height(2.dp).background(Color(0xFFB7B7B7), RoundedCornerShape(3.dp))
+                    )
+                    Spacer(Modifier.height(6.dp))
+                }
+            }
+            Box(
+                Modifier.align(Alignment.BottomEnd).padding(9.dp)
+                    .clip(RoundedCornerShape(6.dp)).background(Color(0xFF111111).copy(alpha = 0.9f))
+                    .padding(horizontal = 7.dp, vertical = 4.dp)
+            ) { Text("PDF", color = Accent, fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp) }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(name, color = MainText, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp)
+        Spacer(Modifier.height(3.dp))
+        Text("PDF DOCUMENT", color = SubText, fontSize = 8.sp, letterSpacing = 1.1.sp)
     }
 }

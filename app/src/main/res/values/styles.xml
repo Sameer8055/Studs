@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Studs" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/studs_black</item>
+        <item name="android:statusBarColor">@color/studs_black</item>
+        <item name="android:navigationBarColor">@color/studs_black</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:colorAccent">#C4CEFF</item>
+    </style>
+    <style name="Theme.Studs.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/studs_black</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/studs_splash_animated</item>
+        <item name="windowSplashScreenAnimationDuration">700</item>
+        <item name="postSplashScreenTheme">@style/Theme.Studs</item>
+    </style>
+</resources>

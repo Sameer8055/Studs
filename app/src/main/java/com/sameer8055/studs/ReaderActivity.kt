@@ -58,52 +58,38 @@ class ReaderActivity : ComponentActivity() {
             )
         window.statusBarColor = android.graphics.Color.BLACK
         window.navigationBarColor = android.graphics.Color.BLACK
-
         val uri = intent.data
         if (uri == null) { finish(); return }
         setContent { MaterialTheme { ReaderScreen(uri) } }
     }
 }
 
-/**
- * PdfRenderer is not thread-safe. All page access is serialized here, while rendering
- * itself happens on Dispatchers.IO. The LRU cache is sized in bytes, not page count.
- */
 private class PdfFile(context: android.content.Context, uri: Uri) {
     private val descriptor: ParcelFileDescriptor =
         requireNotNull(context.contentResolver.openFileDescriptor(uri, "r"))
     private val renderer = PdfRenderer(descriptor)
-    private val cache = object : android.util.LruCache<String, Bitmap>(72 * 1024 * 1024) {
+    private val cache = object : android.util.LruCache<String, Bitmap>(80 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
-
     val pageCount: Int get() = renderer.pageCount
-
-    private fun cacheKey(index: Int, width: Int, height: Int) = "$index:$width:$height"
 
     @Synchronized
     fun render(index: Int, viewportWidth: Int, viewportHeight: Int): Bitmap {
         val page = renderer.openPage(index)
         try {
-            val fit = min(
-                viewportWidth.toFloat() / page.width.toFloat(),
-                viewportHeight.toFloat() / page.height.toFloat()
-            ).coerceAtLeast(0.1f)
-            // Render above display resolution for crisp text while keeping memory bounded.
-            val pixelScale = fit * 1.6f
+            val fit = min(viewportWidth.toFloat() / page.width, viewportHeight.toFloat() / page.height).coerceAtLeast(0.1f)
+            val pixelScale = fit * 1.8f
             var width = max(1, (page.width * pixelScale).toInt())
             var height = max(1, (page.height * pixelScale).toInt())
-            val pixelCount = width.toLong() * height.toLong()
-            val maxPixels = 5_000_000L
-            if (pixelCount > maxPixels) {
-                val reduction = sqrt(maxPixels.toDouble() / pixelCount.toDouble()).toFloat()
+            val pixels = width.toLong() * height.toLong()
+            val maxPixels = 6_000_000L
+            if (pixels > maxPixels) {
+                val reduction = sqrt(maxPixels.toDouble() / pixels.toDouble()).toFloat()
                 width = max(1, (width * reduction).toInt())
                 height = max(1, (height * reduction).toInt())
             }
-
-            val key = cacheKey(index, width, height)
+            val key = "$index:$width:$height"
             cache.get(key)?.let { return it }
-
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             bitmap.eraseColor(android.graphics.Color.WHITE)
             page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
@@ -127,7 +113,6 @@ private fun ReaderScreen(uri: Uri) {
     val context = LocalContext.current
     val opened = remember(uri) { runCatching { PdfFile(context, uri) } }
     DisposableEffect(opened) { onDispose { opened.getOrNull()?.close() } }
-
     if (opened.isFailure) {
         Surface(Modifier.fillMaxSize(), color = ReaderBlack) {
             Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
@@ -139,25 +124,21 @@ private fun ReaderScreen(uri: Uri) {
     val pdf = opened.getOrThrow()
     if (pdf.pageCount < 1) {
         Surface(Modifier.fillMaxSize(), color = ReaderBlack) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("This PDF has no pages.", color = ReaderInk)
-            }
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("This PDF has no pages.", color = ReaderInk) }
         }
         return
     }
 
     val prefs = remember(uri) { context.getSharedPreferences("studs_reading_positions", 0) }
-    var page by remember(uri) {
-        mutableIntStateOf(prefs.getInt(uri.toString(), 0).coerceIn(0, pdf.pageCount - 1))
-    }
+    var page by remember(uri) { mutableIntStateOf(prefs.getInt(uri.toString(), 0).coerceIn(0, pdf.pageCount - 1)) }
     var zoom by remember(uri) { mutableFloatStateOf(1f) }
     var panX by remember(uri) { mutableFloatStateOf(0f) }
     var panY by remember(uri) { mutableFloatStateOf(0f) }
     var swipeDistance by remember(uri) { mutableFloatStateOf(0f) }
+    var displayedPage by remember(uri) { mutableIntStateOf(-1) }
+    var displayedBitmap by remember(uri) { mutableStateOf<Bitmap?>(null) }
 
-    LaunchedEffect(uri, page) {
-        prefs.edit().putInt(uri.toString(), page).apply()
-    }
+    LaunchedEffect(uri, page) { prefs.edit().putInt(uri.toString(), page).apply() }
     LaunchedEffect(page) {
         zoom = 1f
         panX = 0f
@@ -166,41 +147,43 @@ private fun ReaderScreen(uri: Uri) {
     }
 
     Surface(Modifier.fillMaxSize(), color = ReaderBlack) {
-        BoxWithConstraints(
-            Modifier.fillMaxSize().background(ReaderBlack),
-            contentAlignment = Alignment.Center
-        ) {
+        BoxWithConstraints(Modifier.fillMaxSize().background(ReaderBlack), contentAlignment = Alignment.Center) {
             val density = LocalDensity.current
             val viewportWidth = with(density) { maxWidth.roundToPx() }.coerceAtLeast(1)
             val viewportHeight = with(density) { maxHeight.roundToPx() }.coerceAtLeast(1)
 
-            // A single stable image surface avoids AnimatedContent's blank/fade frame.
-            val bitmap by produceState<Bitmap?>(null, uri, page, viewportWidth, viewportHeight) {
-                value = withContext(Dispatchers.IO) {
+            LaunchedEffect(uri, page, viewportWidth, viewportHeight) {
+                val rendered = withContext(Dispatchers.IO) {
                     runCatching { pdf.render(page, viewportWidth, viewportHeight) }.getOrNull()
                 }
+                if (rendered != null) {
+                    displayedBitmap = rendered
+                    displayedPage = page
+                }
             }
-
-            // Keep the immediate neighbours warm. Page navigation then usually reads from cache.
-            LaunchedEffect(uri, page, viewportWidth, viewportHeight, bitmap != null) {
-                if (bitmap != null) withContext(Dispatchers.IO) {
+            LaunchedEffect(uri, page, viewportWidth, viewportHeight, displayedPage) {
+                if (displayedPage == page) withContext(Dispatchers.IO) {
                     if (page > 0) runCatching { pdf.render(page - 1, viewportWidth, viewportHeight) }
                     if (page < pdf.pageCount - 1) runCatching { pdf.render(page + 1, viewportWidth, viewportHeight) }
                 }
             }
 
-            val currentPage by rememberUpdatedState(page)
             Box(
                 Modifier.fillMaxSize().pointerInput(uri, page, viewportWidth, viewportHeight) {
-                    detectTransformGestures { _, pan, zoomChange, _ ->
-                        val nextZoom = (zoom * zoomChange).coerceIn(1f, 5f)
-                        if (nextZoom > 1.001f || zoom > 1.001f) {
+                    detectTransformGestures { centroid, pan, zoomChange, _ ->
+                        val previousZoom = zoom
+                        val nextZoom = (previousZoom * zoomChange).coerceIn(1f, 5f)
+                        val appliedScale = nextZoom / previousZoom
+                        if (nextZoom > 1.001f || previousZoom > 1.001f) {
+                            val focusX = centroid.x - size.width / 2f
+                            val focusY = centroid.y - size.height / 2f
+                            panX = focusX + (panX - focusX) * appliedScale + pan.x
+                            panY = focusY + (panY - focusY) * appliedScale + pan.y
                             zoom = nextZoom
-                            // Bound panning to the scaled page, preventing the page from drifting away.
                             val maxX = size.width * (zoom - 1f) / 2f
                             val maxY = size.height * (zoom - 1f) / 2f
-                            panX = (panX + pan.x).coerceIn(-maxX, maxX)
-                            panY = (panY + pan.y).coerceIn(-maxY, maxY)
+                            panX = panX.coerceIn(-maxX, maxX)
+                            panY = panY.coerceIn(-maxY, maxY)
                             if (zoom <= 1.001f) {
                                 zoom = 1f
                                 panX = 0f
@@ -209,11 +192,11 @@ private fun ReaderScreen(uri: Uri) {
                             swipeDistance = 0f
                         } else {
                             swipeDistance += pan.x
-                            if (swipeDistance <= -64f && currentPage < pdf.pageCount - 1) {
-                                page = currentPage + 1
+                            if (swipeDistance <= -58f && page < pdf.pageCount - 1) {
+                                page += 1
                                 swipeDistance = 0f
-                            } else if (swipeDistance >= 64f && currentPage > 0) {
-                                page = currentPage - 1
+                            } else if (swipeDistance >= 58f && page > 0) {
+                                page -= 1
                                 swipeDistance = 0f
                             }
                         }
@@ -221,9 +204,9 @@ private fun ReaderScreen(uri: Uri) {
                 },
                 contentAlignment = Alignment.Center
             ) {
-                if (bitmap != null) {
+                displayedBitmap?.let { bitmap ->
                     Image(
-                        bitmap = bitmap!!.asImageBitmap(),
+                        bitmap = bitmap.asImageBitmap(),
                         contentDescription = null,
                         modifier = Modifier.fillMaxSize().graphicsLayer {
                             scaleX = zoom
@@ -236,7 +219,6 @@ private fun ReaderScreen(uri: Uri) {
                 }
             }
 
-            // Stable controls remain mounted while the page bitmap changes.
             Row(
                 Modifier.align(Alignment.BottomEnd).padding(end = 18.dp, bottom = 22.dp)
                     .clip(RoundedCornerShape(28.dp)).background(ReaderPanel.copy(alpha = 0.94f))

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="432dp" android:height="432dp"
+    android:viewportWidth="512" android:viewportHeight="512">
+    <group android:name="logo_group" android:pivotX="256" android:pivotY="256" android:scaleX="0.84" android:scaleY="0.84">
+        <path android:name="logo_path" android:fillColor="#FFFFFFFF"
+            android:pathData="M140,104 H375 V145 C375,179 348,205 315,205 H249 C222,205 203,224 203,250 C203,276 223,296 249,296 H276 C334,296 380,343 380,400 V418 H145 V377 C145,345 170,322 201,322 H270 C296,322 316,302 316,276 C316,250 296,230 270,230 H245 C187,230 140,187 140,145 Z"/>
+    </group>
+</vector>
