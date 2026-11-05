@@ -6,6 +6,7 @@ import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
+import java.io.File
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -94,7 +95,7 @@ private data class PdfEntry(val uri: String, val name: String, val folder: Strin
 private fun createPdfThumbnail(context: android.content.Context, uriString: String): Bitmap? {
     return runCatching {
         val uri = Uri.parse(uriString)
-        val descriptor = context.contentResolver.openFileDescriptor(uri, "r") ?: return null
+        val descriptor = if (uri.scheme == "file") ParcelFileDescriptor.open(File(requireNotNull(uri.path)), ParcelFileDescriptor.MODE_READ_ONLY) else context.contentResolver.openFileDescriptor(uri, "r") ?: return null
         descriptor.use { pfd ->
             PdfRenderer(pfd).use { renderer ->
                 if (renderer.pageCount < 1) return null
