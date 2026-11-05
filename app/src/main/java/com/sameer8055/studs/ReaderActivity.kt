@@ -3,11 +3,11 @@
 package com.sameer8055.studs
 
 import android.graphics.Bitmap
-import android.graphics.pdf.PdfRenderer
 import java.io.File
 import android.net.Uri
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
+import io.legere.pdfiumandroid.PdfiumCore
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -84,11 +84,12 @@ class ReaderActivity : ComponentActivity() {
 
 private class PdfFile(context: android.content.Context, uri: Uri) {
     private val descriptor: ParcelFileDescriptor = if (uri.scheme == "file") ParcelFileDescriptor.open(File(requireNotNull(uri.path)), ParcelFileDescriptor.MODE_READ_ONLY) else requireNotNull(context.contentResolver.openFileDescriptor(uri, "r"))
-    private val renderer = PdfRenderer(descriptor)
+    private val pdfium = PdfiumCore(context)
+    private val document = pdfium.newDocument(descriptor)
     private val cache = object : android.util.LruCache<String, Bitmap>(80 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
     }
-    val pageCount: Int get() = renderer.pageCount
+    val pageCount: Int get() = document.getPageCount()
     @Volatile private var priorityPage: Int = -1
 
     fun prioritize(index: Int) {
@@ -99,13 +100,15 @@ private class PdfFile(context: android.content.Context, uri: Uri) {
     fun render(index: Int, viewportWidth: Int, viewportHeight: Int): Bitmap? {
         // Drop stale full-size requests waiting behind an in-progress render.
         if (viewportWidth > 400 && index != priorityPage) return null
-        val safeIndex = index.coerceIn(0, renderer.pageCount - 1)
-        val page = renderer.openPage(safeIndex)
+        val safeIndex = index.coerceIn(0, document.getPageCount() - 1)
+        val page = document.openPage(safeIndex) ?: return null
         try {
-            val fit = min(viewportWidth.toFloat() / page.width, viewportHeight.toFloat() / page.height).coerceAtLeast(0.1f)
+            val pageWidth = page.getPageWidth(72).coerceAtLeast(1)
+            val pageHeight = page.getPageHeight(72).coerceAtLeast(1)
+            val fit = min(viewportWidth.toFloat() / pageWidth, viewportHeight.toFloat() / pageHeight).coerceAtLeast(0.1f)
             val pixelScale = fit * 1.8f
-            var width = max(1, (page.width * pixelScale).toInt())
-            var height = max(1, (page.height * pixelScale).toInt())
+            var width = max(1, (pageWidth * pixelScale).toInt())
+            var height = max(1, (pageHeight * pixelScale).toInt())
             val pixels = width.toLong() * height.toLong()
             val maxPixels = 6_000_000L
             if (pixels > maxPixels) {
@@ -117,7 +120,7 @@ private class PdfFile(context: android.content.Context, uri: Uri) {
             cache.get(key)?.let { return it }
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             bitmap.eraseColor(android.graphics.Color.WHITE)
-            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+            page.renderPageBitmap(bitmap, 0, 0, width, height)
             cache.put(key, bitmap)
             return bitmap
         } finally {
@@ -128,7 +131,7 @@ private class PdfFile(context: android.content.Context, uri: Uri) {
     @Synchronized
     fun close() {
         cache.evictAll()
-        renderer.close()
+        document.close()
         descriptor.close()
     }
 }
