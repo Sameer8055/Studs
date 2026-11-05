@@ -69,7 +69,7 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { context.getSharedPreferences("studs_library", 0) }
     var pdfs by remember {
-        mutableStateOf(runCatching {
+        mutableStateOf<List<PdfEntry>>(runCatching {
             val json = JSONObject(prefs.getString("pdfs", "{}") ?: "{}")
             buildList {
                 val keys = json.keys()
@@ -81,7 +81,7 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
             }
         }.getOrDefault(emptyList()))
     }
-    var folders by remember { mutableStateOf(prefs.getStringSet("folders", emptySet())?.toList()?.sorted() ?: emptyList()) }
+    var folders by remember { mutableStateOf<List<String>>(prefs.getStringSet("folders", emptySet())?.toList()?.sorted() ?: emptyList()) }
     var activeFolder by remember { mutableStateOf<String?>(null) }
     var showFolderDialog by remember { mutableStateOf(false) }
     var folderName by remember { mutableStateOf("") }
