@@ -135,6 +135,9 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
     var folderName by remember { mutableStateOf("") }
     var typedBrand by remember { mutableStateOf("") }
     var logoShifted by remember { mutableStateOf(false) }
+    var introVisible by remember { mutableStateOf(true) }
+    var introLogoShifted by remember { mutableStateOf(false) }
+    var introBrand by remember { mutableStateOf("") }
     var selectedPdfs by remember { mutableStateOf<Set<String>>(emptySet()) }
     var renameTarget by remember { mutableStateOf<PdfEntry?>(null) }
     var renameValue by remember { mutableStateOf("") }
@@ -143,6 +146,11 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
     BackHandler(enabled = activeFolder != null) { activeFolder = null }
 
     LaunchedEffect(Unit) {
+        delay(140)
+        introLogoShifted = true
+        "STUDS".forEach { character -> delay(85); introBrand += character }
+        delay(380)
+        introVisible = false
         delay(180)
         logoShifted = true
         "STUDS".forEach { character ->
@@ -175,6 +183,7 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
     val visiblePdfs = pdfs.filter { it.folder == activeFolder.orEmpty() }
 
     Surface(Modifier.fillMaxSize(), color = OledBlack) {
+        Box(Modifier.fillMaxSize()) {
         Column(
             Modifier.fillMaxSize().background(OledBlack).statusBarsPadding().padding(horizontal = 20.dp)
         ) {
@@ -279,6 +288,23 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
                     }
                 }
             }
+        }
+        AnimatedVisibility(
+            visible = introVisible,
+            modifier = Modifier.fillMaxSize(),
+            enter = fadeIn(tween(100)),
+            exit = fadeOut(tween(260))
+        ) {
+            Box(Modifier.fillMaxSize().background(OledBlack), contentAlignment = Alignment.Center) {
+                val introOffset by animateDpAsState(if (introLogoShifted) 0.dp else 42.dp, tween(650), label = "intro-logo-slide")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Image(painter = painterResource(R.drawable.studs_logo), contentDescription = "Studs logo",
+                        modifier = Modifier.offset(x = introOffset).size(54.dp).clip(RoundedCornerShape(15.dp)))
+                    Spacer(Modifier.width(13.dp))
+                    Text(introBrand, color = MainText, fontSize = 23.sp, fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
+                }
+            }
+        }
         }
     }
 
