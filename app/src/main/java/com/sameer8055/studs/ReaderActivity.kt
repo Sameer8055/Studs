@@ -2,12 +2,15 @@ package com.sameer8055.studs
 
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
+import java.io.File
 import android.net.Uri
 import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -18,13 +21,17 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -42,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.math.max
@@ -70,13 +78,13 @@ class ReaderActivity : ComponentActivity() {
         window.navigationBarColor = android.graphics.Color.BLACK
         val uri = intent.data
         if (uri == null) { finish(); return }
-        setContent { MaterialTheme { ReaderScreen(uri) } }
+        val name = intent.getStringExtra("document_name") ?: "PDF document"
+        setContent { MaterialTheme { ReaderScreen(uri, name) } }
     }
 }
 
 private class PdfFile(context: android.content.Context, uri: Uri) {
-    private val descriptor: ParcelFileDescriptor =
-        requireNotNull(context.contentResolver.openFileDescriptor(uri, "r"))
+    private val descriptor: ParcelFileDescriptor = if (uri.scheme == "file") ParcelFileDescriptor.open(File(requireNotNull(uri.path)), ParcelFileDescriptor.MODE_READ_ONLY) else requireNotNull(context.contentResolver.openFileDescriptor(uri, "r"))
     private val renderer = PdfRenderer(descriptor)
     private val cache = object : android.util.LruCache<String, Bitmap>(80 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount
@@ -127,9 +135,25 @@ private class PdfFile(context: android.content.Context, uri: Uri) {
 }
 
 @Composable
-private fun ReaderScreen(uri: Uri) {
+private fun ReaderScreen(uri: Uri, documentName: String) {
     val context = LocalContext.current
-    val opened = remember(uri) { runCatching { PdfFile(context, uri) } }
+    val scope = rememberCoroutineScope()
+    var activeUri by remember(uri) { mutableStateOf(uri) }
+    var selectedPages by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    var moveTarget by remember { mutableStateOf("") }
+    var showMoveDialog by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
+    var editError by remember { mutableStateOf<String?>(null) }
+    val appendPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { selected ->
+        if (selected != null) scope.launch {
+            editing = true
+            runCatching { PdfEditor.edit(context, activeUri, appendUri = selected) }
+                .onSuccess { activeUri = it; selectedPages = emptySet() }
+                .onFailure { editError = it.message ?: "Could not append that PDF." }
+            editing = false
+        }
+    }
+    val opened = remember(activeUri) { runCatching { PdfFile(context, activeUri) } }
     DisposableEffect(opened) { onDispose { opened.getOrNull()?.close() } }
     if (opened.isFailure) {
         Surface(Modifier.fillMaxSize(), color = ReaderBlack) {
@@ -147,8 +171,8 @@ private fun ReaderScreen(uri: Uri) {
         return
     }
 
-    val prefs = remember(uri) { context.getSharedPreferences("studs_reading_positions", 0) }
-    var page by remember(uri) { mutableIntStateOf(prefs.getInt(uri.toString(), 0).coerceIn(0, pdf.pageCount - 1)) }
+    val prefs = remember { context.getSharedPreferences("studs_reading_positions", 0) }
+    var page by remember(activeUri) { mutableIntStateOf(prefs.getInt(activeUri.toString(), 0).coerceIn(0, pdf.pageCount - 1)) }
     var zoom by remember(uri) { mutableFloatStateOf(1f) }
     var panX by remember(uri) { mutableFloatStateOf(0f) }
     var panY by remember(uri) { mutableFloatStateOf(0f) }
@@ -156,6 +180,16 @@ private fun ReaderScreen(uri: Uri) {
     var displayedPage by remember(uri) { mutableIntStateOf(-1) }
     var displayedBitmap by remember(uri) { mutableStateOf<Bitmap?>(null) }
     var showPagePreviews by remember { mutableStateOf(false) }
+
+    fun applyPageEdits(delete: Set<Int> = emptySet(), moveFrom: Int? = null, moveTo: Int? = null) {
+        scope.launch {
+            editing = true
+            runCatching { PdfEditor.edit(context, activeUri, deletePages = delete, moveFrom = moveFrom, moveTo = moveTo) }
+                .onSuccess { activeUri = it; selectedPages = emptySet(); showPagePreviews = true }
+                .onFailure { editError = it.message ?: "Could not edit this PDF." }
+            editing = false
+        }
+    }
 
     LaunchedEffect(uri, page) {
         pdf.prioritize(page)
@@ -248,8 +282,19 @@ private fun ReaderScreen(uri: Uri) {
                         .background(Color(0xF20D0D0D)).border(1.dp, ReaderBorder, RoundedCornerShape(20.dp))
                         .padding(horizontal = 10.dp, vertical = 12.dp)
                 ) {
-                    Text("PAGE OVERVIEW", color = ReaderMuted, fontSize = 9.sp, letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold)
-                    Spacer(Modifier.height(10.dp))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(if (selectedPages.isEmpty()) "PAGES" else "${selectedPages.size} SELECTED", color = ReaderMuted, fontSize = 9.sp, letterSpacing = 1.2.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                        Box(Modifier.size(30.dp).clip(CircleShape).clickable { appendPicker.launch(arrayOf("application/pdf")) }, contentAlignment = Alignment.Center) { Text("＋", color = ReaderInk, fontSize = 22.sp) }
+                    }
+                    if (selectedPages.isNotEmpty()) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            TextButton(onClick = { applyPageEdits(delete = selectedPages) }, enabled = selectedPages.size < pdf.pageCount) { Text("Delete", color = Color(0xFFFF8C8C), fontSize = 10.sp) }
+                            TextButton(onClick = { moveTarget = (selectedPages.singleOrNull()?.plus(1) ?: 1).toString(); showMoveDialog = true }, enabled = selectedPages.size == 1) { Text("Move", color = Color(0xFFC4CEFF), fontSize = 10.sp) }
+                            TextButton(onClick = { selectedPages = emptySet() }) { Text("Clear", color = ReaderMuted, fontSize = 10.sp) }
+                        }
+                    }
+                    if (editing) Text("Updating PDF…", color = Color(0xFFC4CEFF), fontSize = 10.sp)
+                    Spacer(Modifier.height(6.dp))
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         verticalArrangement = Arrangement.spacedBy(11.dp),
@@ -260,10 +305,12 @@ private fun ReaderScreen(uri: Uri) {
                                 pdf = pdf,
                                 index = index,
                                 selected = index == page,
+                                checked = index in selectedPages,
                                 onClick = {
-                                    page = index
-                                    showPagePreviews = false
-                                }
+                                    if (selectedPages.isNotEmpty()) selectedPages = if (index in selectedPages) selectedPages - index else selectedPages + index
+                                    else { page = index; showPagePreviews = false }
+                                },
+                                onLongClick = { selectedPages = selectedPages + index }
                             )
                         }
                     }
@@ -295,10 +342,25 @@ private fun ReaderScreen(uri: Uri) {
             }
         }
     }
+    if (showMoveDialog) AlertDialog(
+        onDismissRequest = { showMoveDialog = false }, containerColor = ReaderPanel,
+        title = { Text("Move page", color = ReaderInk) },
+        text = { OutlinedTextField(value = moveTarget, onValueChange = { moveTarget = it.filter(Char::isDigit) }, singleLine = true, label = { Text("New position (1–${pdf.pageCount})") }) },
+        confirmButton = { TextButton(onClick = {
+            val from = selectedPages.singleOrNull(); val target = moveTarget.toIntOrNull()?.minus(1)
+            if (from != null && target != null) applyPageEdits(moveFrom = from, moveTo = target)
+            showMoveDialog = false
+        }) { Text("Move", color = Color(0xFFC4CEFF)) } },
+        dismissButton = { TextButton(onClick = { showMoveDialog = false }) { Text("Cancel", color = ReaderMuted) } }
+    )
+    if (editError != null) AlertDialog(onDismissRequest = { editError = null }, containerColor = ReaderPanel,
+        title = { Text("PDF update failed", color = ReaderInk) }, text = { Text(editError.orEmpty(), color = ReaderMuted) },
+        confirmButton = { TextButton(onClick = { editError = null }) { Text("OK", color = Color(0xFFC4CEFF)) } })
+
 }
 
 @Composable
-private fun PagePreviewItem(pdf: PdfFile, index: Int, selected: Boolean, onClick: () -> Unit) {
+private fun PagePreviewItem(pdf: PdfFile, index: Int, selected: Boolean, checked: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     val bitmap by produceState<Bitmap?>(initialValue = null, key1 = pdf, key2 = index) {
         value = withContext(Dispatchers.IO) {
             runCatching { pdf.render(index, 260, 340) }.getOrNull()
@@ -306,9 +368,9 @@ private fun PagePreviewItem(pdf: PdfFile, index: Int, selected: Boolean, onClick
     }
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-            .background(if (selected) Color(0xFF292A38) else Color.Transparent)
-            .border(if (selected) 1.dp else 0.dp, if (selected) Color(0xFFC4CEFF) else Color.Transparent, RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick).padding(7.dp),
+            .background(if (checked) Color(0xFF292A38) else Color.Transparent)
+            .border(if (checked || selected) 1.dp else 0.dp, if (checked || selected) Color(0xFFC4CEFF) else Color.Transparent, RoundedCornerShape(10.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(7.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
@@ -322,7 +384,7 @@ private fun PagePreviewItem(pdf: PdfFile, index: Int, selected: Boolean, onClick
             }
         }
         Spacer(Modifier.height(5.dp))
-        Text("Page ${index + 1}", color = if (selected) Color(0xFFC4CEFF) else ReaderMuted, fontSize = 10.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+        Text("${index + 1}", color = if (checked || selected) Color(0xFFC4CEFF) else ReaderMuted, fontSize = 10.sp, fontWeight = if (checked || selected) FontWeight.SemiBold else FontWeight.Normal)
     }
 }
 
