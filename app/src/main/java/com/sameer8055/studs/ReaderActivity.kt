@@ -62,19 +62,35 @@ private class PdfFile(context: android.content.Context, uri: Uri) {
     private val descriptor: ParcelFileDescriptor =
         requireNotNull(context.contentResolver.openFileDescriptor(uri, "r"))
     private val renderer = PdfRenderer(descriptor)
+    private val cache = android.util.LruCache<String, Bitmap>(24 * 1024 * 1024) {
+        it.byteCount
+    }
     val pageCount get() = renderer.pageCount
-    fun render(index: Int, width: Int): Bitmap {
+
+    @Synchronized
+    fun render(index: Int, requestedWidth: Int): Bitmap {
+        val width = max(1, requestedWidth)
+        val key = "$index-$width"
+        cache.get(key)?.let { return it }
         val page = renderer.openPage(index)
         try {
-            val w = max(1, width)
-            val h = max(1, (w.toFloat() * page.height / page.width).toInt())
-            return Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also {
-                it.eraseColor(android.graphics.Color.WHITE)
-                page.render(it, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-            }
-        } finally { page.close() }
+            val height = max(1, (width.toFloat() * page.height / page.width).toInt())
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            bitmap.eraseColor(android.graphics.Color.WHITE)
+            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+            cache.put(key, bitmap)
+            return bitmap
+        } finally {
+            page.close()
+        }
     }
-    fun close() { renderer.close(); descriptor.close() }
+
+    @Synchronized
+    fun close() {
+        cache.evictAll()
+        renderer.close()
+        descriptor.close()
+    }
 }
 
 @Composable
@@ -176,17 +192,58 @@ private fun ReaderScreen(uri: Uri, title: String, onExit: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(9.dp)
                 ) {
                     items((0 until pdf.pageCount).toList()) { index ->
-                        Box(
-                            Modifier.aspectRatio(0.76f).clip(RoundedCornerShape(11.dp))
-                                .background(if (index == page) Accent.copy(alpha = 0.16f) else Color(0xFF222937))
-                                .border(1.dp, if (index == page) Accent else Stroke, RoundedCornerShape(11.dp))
-                                .clickable { page = index; showPreview = false },
-                            contentAlignment = Alignment.Center
-                        ) { Text("${index + 1}", color = if (index == page) Accent else Ink, fontWeight = FontWeight.Medium) }
+                        PageThumbnail(
+                            pdf = pdf,
+                            index = index,
+                            selected = index == page,
+                            onClick = { page = index; showPreview = false }
+                        )
                     }
                 }
             },
             confirmButton = { TextButton(onClick = { showPreview = false }) { Text("Close", color = Accent) } }
+        )
+    }
+}
+
+
+@Composable
+private fun PageThumbnail(
+    pdf: PdfFile,
+    index: Int,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    val thumbnail by produceState<Bitmap?>(null, pdf, index) {
+        value = withContext(Dispatchers.IO) {
+            runCatching { pdf.render(index, 180) }.getOrNull()
+        }
+    }
+    Box(
+        Modifier.aspectRatio(0.76f)
+            .clip(RoundedCornerShape(11.dp))
+            .background(if (selected) Accent.copy(alpha = 0.16f) else Color(0xFF222937))
+            .border(1.dp, if (selected) Accent else Stroke, RoundedCornerShape(11.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        if (thumbnail != null) {
+            Image(
+                bitmap = thumbnail!!.asImageBitmap(),
+                contentDescription = "Preview of page ${index + 1}",
+                modifier = Modifier.fillMaxSize().padding(3.dp).clip(RoundedCornerShape(7.dp))
+            )
+        } else {
+            Text("${index + 1}", color = if (selected) Accent else Ink, fontWeight = FontWeight.Medium)
+        }
+        Text(
+            "${index + 1}",
+            modifier = Modifier.align(Alignment.BottomCenter)
+                .padding(bottom = 4.dp)
+                .background(Bg.copy(alpha = 0.82f), RoundedCornerShape(5.dp))
+                .padding(horizontal = 5.dp, vertical = 1.dp),
+            color = Ink,
+            fontSize = 9.sp
         )
     }
 }
