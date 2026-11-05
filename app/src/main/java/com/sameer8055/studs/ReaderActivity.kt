@@ -17,6 +17,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -359,6 +360,7 @@ private fun ReaderScreen(uri: Uri, documentName: String) {
 
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PagePreviewItem(pdf: PdfFile, index: Int, selected: Boolean, checked: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     val bitmap by produceState<Bitmap?>(initialValue = null, key1 = pdf, key2 = index) {
