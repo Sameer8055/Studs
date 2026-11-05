@@ -1,6 +1,7 @@
 package com.sameer8055.studs
 
 import android.net.Uri
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -59,6 +60,11 @@ class MainActivity : ComponentActivity() {
                                 android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
                             )
                         }
+                        startActivity(Intent(this, ReaderActivity::class.java).apply {
+                            data = uri
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            putExtra("document_name", DocumentFile.fromSingleUri(this@MainActivity, uri)?.name ?: "PDF document")
+                        })
                     }
                 )
             }
