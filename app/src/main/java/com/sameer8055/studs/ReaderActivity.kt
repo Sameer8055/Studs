@@ -7,7 +7,6 @@ import android.os.Bundle
 import android.os.ParcelFileDescriptor
 import android.view.View
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
@@ -135,7 +134,6 @@ private fun ReaderScreen(uri: Uri) {
     var panX by remember(uri, page) { mutableFloatStateOf(0f) }
     var panY by remember(uri, page) { mutableFloatStateOf(0f) }
     var swipeDistance by remember(uri, page) { mutableFloatStateOf(0f) }
-    BackHandler { /* Hardware back exits; no on-screen back control. */ }
     LaunchedEffect(uri, page) { prefs.edit().putInt(uri.toString(), page).apply() }
 
     Surface(Modifier.fillMaxSize(), color = ReaderBlack) {
