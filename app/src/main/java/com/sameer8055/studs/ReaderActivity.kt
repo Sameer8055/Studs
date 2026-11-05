@@ -40,7 +40,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.math.max
 import kotlin.math.min
@@ -79,7 +78,7 @@ class ReaderActivity : ComponentActivity() {
         val uri = intent.data
         if (uri == null) { finish(); return }
         val name = intent.getStringExtra("document_name") ?: "PDF document"
-        setContent { MaterialTheme { ReaderScreen(uri, name) } }
+        setContent { MaterialTheme { ReaderScreen(uri, name, this) } }
     }
 }
 
@@ -135,7 +134,7 @@ private class PdfFile(context: android.content.Context, uri: Uri) {
 }
 
 @Composable
-private fun ReaderScreen(uri: Uri, documentName: String) {
+private fun ReaderScreen(uri: Uri, documentName: String, activity: ReaderActivity) {
     val context = LocalContext.current
     var activeUri by remember(uri) { mutableStateOf(uri) }
     val opened = remember(activeUri) { runCatching { PdfFile(context, activeUri) } }
@@ -159,10 +158,10 @@ private fun ReaderScreen(uri: Uri, documentName: String) {
     val prefs = remember { context.getSharedPreferences("studs_reading_positions", 0) }
     var page by remember(activeUri) { mutableIntStateOf(prefs.getInt(activeUri.toString(), 0).coerceIn(0, pdf.pageCount - 1)) }
     DisposableEffect(Unit) {
-        (context as? ReaderActivity)?.volumePageHandler = { direction ->
+        activity.volumePageHandler = { direction ->
             page = (page + direction).coerceIn(0, pdf.pageCount - 1)
         }
-        onDispose { (context as? ReaderActivity)?.volumePageHandler = null }
+        onDispose { activity.volumePageHandler = null }
     }
     var zoom by remember(uri) { mutableFloatStateOf(1f) }
     var panX by remember(uri) { mutableFloatStateOf(0f) }
