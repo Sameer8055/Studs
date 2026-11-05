@@ -141,6 +141,25 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
     var introVisible by remember { mutableStateOf(true) }
     var introLogoShifted by remember { mutableStateOf(false) }
     var introBrand by remember { mutableStateOf("") }
+    DisposableEffect(prefs) {
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { shared, key ->
+            if (key == "pdfs") {
+                pdfs = runCatching {
+                    val json = JSONObject(shared.getString("pdfs", "{}") ?: "{}")
+                    buildList {
+                        val keys = json.keys()
+                        while (keys.hasNext()) {
+                            val uri = keys.next()
+                            val item = json.getJSONObject(uri)
+                            add(PdfEntry(uri, item.optString("name", "PDF document"), item.optString("folder", "")))
+                        }
+                    }
+                }.getOrDefault(emptyList())
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
     var selectedPdfs by remember { mutableStateOf<Set<String>>(emptySet()) }
     var renameTarget by remember { mutableStateOf<PdfEntry?>(null) }
     var renameValue by remember { mutableStateOf("") }
