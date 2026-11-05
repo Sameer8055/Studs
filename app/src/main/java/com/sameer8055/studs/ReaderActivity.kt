@@ -8,12 +8,19 @@ import android.os.ParcelFileDescriptor
 import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -30,9 +37,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.math.max
 import kotlin.math.min
@@ -75,7 +84,8 @@ private class PdfFile(context: android.content.Context, uri: Uri) {
 
     @Synchronized
     fun render(index: Int, viewportWidth: Int, viewportHeight: Int): Bitmap {
-        val page = renderer.openPage(index)
+        val safeIndex = index.coerceIn(0, renderer.pageCount - 1)
+        val page = renderer.openPage(safeIndex)
         try {
             val fit = min(viewportWidth.toFloat() / page.width, viewportHeight.toFloat() / page.height).coerceAtLeast(0.1f)
             val pixelScale = fit * 1.8f
@@ -88,7 +98,7 @@ private class PdfFile(context: android.content.Context, uri: Uri) {
                 width = max(1, (width * reduction).toInt())
                 height = max(1, (height * reduction).toInt())
             }
-            val key = "$index:$width:$height"
+            val key = "$safeIndex:$width:$height"
             cache.get(key)?.let { return it }
             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             bitmap.eraseColor(android.graphics.Color.WHITE)
@@ -137,6 +147,7 @@ private fun ReaderScreen(uri: Uri) {
     var swipeDistance by remember(uri) { mutableFloatStateOf(0f) }
     var displayedPage by remember(uri) { mutableIntStateOf(-1) }
     var displayedBitmap by remember(uri) { mutableStateOf<Bitmap?>(null) }
+    var showPagePreviews by remember { mutableStateOf(false) }
 
     LaunchedEffect(uri, page) { prefs.edit().putInt(uri.toString(), page).apply() }
     LaunchedEffect(page) {
@@ -153,18 +164,15 @@ private fun ReaderScreen(uri: Uri) {
             val viewportHeight = with(density) { maxHeight.roundToPx() }.coerceAtLeast(1)
 
             LaunchedEffect(uri, page, viewportWidth, viewportHeight) {
+                // Coalesce quick taps: render the latest requested page, not every skipped page.
+                delay(38)
+                val requestedPage = page
                 val rendered = withContext(Dispatchers.IO) {
-                    runCatching { pdf.render(page, viewportWidth, viewportHeight) }.getOrNull()
+                    runCatching { pdf.render(requestedPage, viewportWidth, viewportHeight) }.getOrNull()
                 }
-                if (rendered != null) {
+                if (rendered != null && requestedPage == page) {
                     displayedBitmap = rendered
-                    displayedPage = page
-                }
-            }
-            LaunchedEffect(uri, page, viewportWidth, viewportHeight, displayedPage) {
-                if (displayedPage == page) withContext(Dispatchers.IO) {
-                    if (page > 0) runCatching { pdf.render(page - 1, viewportWidth, viewportHeight) }
-                    if (page < pdf.pageCount - 1) runCatching { pdf.render(page + 1, viewportWidth, viewportHeight) }
+                    displayedPage = requestedPage
                 }
             }
 
@@ -193,10 +201,10 @@ private fun ReaderScreen(uri: Uri) {
                         } else {
                             swipeDistance += pan.x
                             if (swipeDistance <= -58f && page < pdf.pageCount - 1) {
-                                page += 1
+                                page = (page + 1).coerceAtMost(pdf.pageCount - 1)
                                 swipeDistance = 0f
                             } else if (swipeDistance >= 58f && page > 0) {
-                                page -= 1
+                                page = (page - 1).coerceAtLeast(0)
                                 swipeDistance = 0f
                             }
                         }
@@ -206,8 +214,7 @@ private fun ReaderScreen(uri: Uri) {
             ) {
                 displayedBitmap?.let { bitmap ->
                     Image(
-                        bitmap = bitmap.asImageBitmap(),
-                        contentDescription = null,
+                        bitmap = bitmap.asImageBitmap(), contentDescription = null,
                         modifier = Modifier.fillMaxSize().graphicsLayer {
                             scaleX = zoom
                             scaleY = zoom
@@ -219,18 +226,92 @@ private fun ReaderScreen(uri: Uri) {
                 }
             }
 
-            Row(
-                Modifier.align(Alignment.BottomEnd).padding(end = 18.dp, bottom = 22.dp)
-                    .clip(RoundedCornerShape(28.dp)).background(ReaderPanel.copy(alpha = 0.94f))
-                    .border(1.dp, ReaderBorder, RoundedCornerShape(28.dp)).padding(5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(3.dp)
+            AnimatedVisibility(
+                visible = showPagePreviews,
+                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(0.78f).padding(end = 12.dp),
+                enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(tween(180)),
+                exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(tween(140))
             ) {
-                ReaderControl("‹", page > 0) { page = (page - 1).coerceAtLeast(0) }
-                Box(Modifier.width(1.dp).height(22.dp).background(ReaderBorder))
-                ReaderControl("›", page < pdf.pageCount - 1) { page = (page + 1).coerceAtMost(pdf.pageCount - 1) }
+                Column(
+                    Modifier.width(158.dp).fillMaxHeight().clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xF20D0D0D)).border(1.dp, ReaderBorder, RoundedCornerShape(20.dp))
+                        .padding(horizontal = 10.dp, vertical = 12.dp)
+                ) {
+                    Text("PAGE OVERVIEW", color = ReaderMuted, fontSize = 9.sp, letterSpacing = 1.5.sp, fontWeight = FontWeight.SemiBold)
+                    Spacer(Modifier.height(10.dp))
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(11.dp),
+                        contentPadding = PaddingValues(bottom = 8.dp)
+                    ) {
+                        items((0 until pdf.pageCount).toList(), key = { it }) { index ->
+                            PagePreviewItem(
+                                pdf = pdf,
+                                index = index,
+                                selected = index == page,
+                                onClick = {
+                                    page = index
+                                    showPagePreviews = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            Row(
+                Modifier.align(Alignment.BottomEnd).padding(end = 18.dp, bottom = 22.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp)
+            ) {
+                Box(
+                    Modifier.size(46.dp).clip(CircleShape).background(ReaderPanel.copy(alpha = 0.96f))
+                        .border(1.dp, ReaderBorder, CircleShape).clickable { showPagePreviews = !showPagePreviews },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("▦", color = if (showPagePreviews) Color(0xFFC4CEFF) else ReaderInk, fontSize = 21.sp)
+                }
+                Row(
+                    Modifier.clip(RoundedCornerShape(28.dp)).background(ReaderPanel.copy(alpha = 0.96f))
+                        .border(1.dp, ReaderBorder, RoundedCornerShape(28.dp)).padding(5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    ReaderControl("‹", page > 0) { page = (page - 1).coerceAtLeast(0) }
+                    Box(Modifier.width(1.dp).height(22.dp).background(ReaderBorder))
+                    ReaderControl("›", page < pdf.pageCount - 1) { page = (page + 1).coerceAtMost(pdf.pageCount - 1) }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun PagePreviewItem(pdf: PdfFile, index: Int, selected: Boolean, onClick: () -> Unit) {
+    val bitmap by produceState<Bitmap?>(initialValue = null, key1 = pdf, key2 = index) {
+        value = withContext(Dispatchers.IO) {
+            runCatching { pdf.render(index, 260, 340) }.getOrNull()
+        }
+    }
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
+            .background(if (selected) Color(0xFF292A38) else Color.Transparent)
+            .border(if (selected) 1.dp else 0.dp, if (selected) Color(0xFFC4CEFF) else Color.Transparent, RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick).padding(7.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            Modifier.fillMaxWidth().height(112.dp).clip(RoundedCornerShape(5.dp)).background(Color(0xFF222222)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (bitmap != null) {
+                Image(bitmap = bitmap!!.asImageBitmap(), contentDescription = "Page ${index + 1}", modifier = Modifier.fillMaxHeight().fillMaxWidth(0.82f), contentScale = ContentScale.Fit)
+            } else {
+                Text("…", color = ReaderMuted, fontSize = 20.sp)
+            }
+        }
+        Spacer(Modifier.height(5.dp))
+        Text("Page ${index + 1}", color = if (selected) Color(0xFFC4CEFF) else ReaderMuted, fontSize = 10.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
     }
 }
 
