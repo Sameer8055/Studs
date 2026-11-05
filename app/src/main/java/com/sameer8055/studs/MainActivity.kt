@@ -1,12 +1,22 @@
 package com.sameer8055.studs
 
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Bundle
+import android.os.ParcelFileDescriptor
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,8 +38,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,11 +50,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.documentfile.provider.DocumentFile
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 private val OledBlack = Color(0xFF000000)
 private val CardBlack = Color(0xFF0D0D0D)
-private val PreviewBlack = Color(0xFF171717)
 private val Hairline = Color(0xFF252525)
 private val MainText = Color(0xFFF4F4F4)
 private val SubText = Color(0xFF858585)
@@ -74,6 +89,26 @@ class MainActivity : ComponentActivity() {
 
 private data class PdfEntry(val uri: String, val name: String, val folder: String)
 
+private fun createPdfThumbnail(context: android.content.Context, uriString: String): Bitmap? {
+    return runCatching {
+        val uri = Uri.parse(uriString)
+        val descriptor = context.contentResolver.openFileDescriptor(uri, "r") ?: return null
+        descriptor.use { pfd ->
+            PdfRenderer(pfd).use { renderer ->
+                if (renderer.pageCount < 1) return null
+                renderer.openPage(0).use { page ->
+                    val width = 360
+                    val height = (width.toFloat() * page.height / page.width).toInt().coerceAtLeast(1)
+                    Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).also { bitmap ->
+                        bitmap.eraseColor(android.graphics.Color.WHITE)
+                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    }
+                }
+            }
+        }
+    }.getOrNull()
+}
+
 @Composable
 private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -95,6 +130,17 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
     var activeFolder by remember { mutableStateOf<String?>(null) }
     var showFolderDialog by remember { mutableStateOf(false) }
     var folderName by remember { mutableStateOf("") }
+    var typedBrand by remember { mutableStateOf("") }
+    var logoShifted by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        delay(180)
+        logoShifted = true
+        "STUDS".forEach { character ->
+            delay(82)
+            typedBrand += character
+        }
+    }
 
     fun saveLibrary(updatedPdfs: List<PdfEntry>, updatedFolders: List<String>) {
         val json = JSONObject()
@@ -108,6 +154,7 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
             val name = runCatching { DocumentFile.fromSingleUri(context, uri)?.name }.getOrNull() ?: "PDF document"
             val entry = PdfEntry(uri.toString(), name, activeFolder.orEmpty())
             saveLibrary(pdfs.filterNot { it.uri == entry.uri } + entry, folders)
@@ -120,28 +167,25 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
 
     Surface(Modifier.fillMaxSize(), color = OledBlack) {
         Column(
-            Modifier.fillMaxSize().background(OledBlack)
-                .statusBarsPadding()
-                .padding(horizontal = 20.dp)
+            Modifier.fillMaxSize().background(OledBlack).statusBarsPadding().padding(horizontal = 20.dp)
         ) {
             Row(
-                Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 26.dp),
+                Modifier.fillMaxWidth().height(64.dp).padding(top = 8.dp, bottom = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                val logoOffset by animateDpAsState(if (logoShifted) 0.dp else 42.dp, tween(650), label = "logo-slide")
                 Image(
                     painter = painterResource(R.drawable.studs_logo),
                     contentDescription = "Studs logo",
-                    modifier = Modifier.size(38.dp).clip(RoundedCornerShape(11.dp))
+                    modifier = Modifier.offset(x = logoOffset).size(39.dp).clip(RoundedCornerShape(11.dp))
                 )
                 Spacer(Modifier.width(11.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("STUDS", color = MainText, fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
+                    Text(typedBrand, color = MainText, fontSize = 16.sp, fontWeight = FontWeight.Bold, letterSpacing = 3.sp)
                     Text("PDF READER", color = SubText, fontSize = 9.sp, letterSpacing = 2.sp)
                 }
                 if (activeFolder != null) {
-                    TextButton(onClick = { activeFolder = null }) {
-                        Text("All files", color = Accent, fontSize = 12.sp)
-                    }
+                    TextButton(onClick = { activeFolder = null }) { Text("All files", color = Accent, fontSize = 12.sp) }
                 }
             }
 
@@ -149,34 +193,25 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
                 Column(Modifier.weight(1f)) {
                     Text(
                         activeFolder ?: "Your library",
-                        color = MainText,
-                        fontSize = 27.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = (-0.6).sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        color = MainText, fontSize = 27.sp, fontWeight = FontWeight.SemiBold,
+                        letterSpacing = (-0.6).sp, maxLines = 1, overflow = TextOverflow.Ellipsis
                     )
                     Spacer(Modifier.height(5.dp))
                     Text(
-                        if (activeFolder == null) "${pdfs.size} documents  ·  ${folders.size} folders"
-                        else "${visiblePdfs.size} documents",
-                        color = SubText,
-                        fontSize = 11.sp
+                        if (activeFolder == null) "${pdfs.size} documents  ·  ${folders.size} folders" else "${visiblePdfs.size} documents",
+                        color = SubText, fontSize = 11.sp
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(
-                        Modifier.clip(RoundedCornerShape(13.dp))
-                            .background(Color(0xFF171717))
+                        Modifier.clip(RoundedCornerShape(13.dp)).background(Color(0xFF171717))
                             .border(1.dp, Hairline, RoundedCornerShape(13.dp))
                             .clickable { picker.launch(arrayOf("application/pdf")) }
                             .padding(horizontal = 13.dp, vertical = 11.dp)
-                    ) {
-                        Text("＋ Import", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                    }
+                    ) { Text("＋ Import", color = Accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) }
                     Box(
-                        Modifier.size(42.dp).clip(RoundedCornerShape(13.dp))
-                            .background(CardBlack).border(1.dp, Hairline, RoundedCornerShape(13.dp))
+                        Modifier.size(42.dp).clip(RoundedCornerShape(13.dp)).background(CardBlack)
+                            .border(1.dp, Hairline, RoundedCornerShape(13.dp))
                             .clickable { folderName = ""; showFolderDialog = true },
                         contentAlignment = Alignment.Center
                     ) { Text("＋", color = MainText, fontSize = 23.sp) }
@@ -188,8 +223,7 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Image(
-                            painter = painterResource(R.drawable.studs_logo),
-                            contentDescription = null,
+                            painter = painterResource(R.drawable.studs_logo), contentDescription = null,
                             modifier = Modifier.size(72.dp).clip(RoundedCornerShape(20.dp))
                         )
                         Spacer(Modifier.height(20.dp))
@@ -200,17 +234,15 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
                 }
             } else {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 148.dp),
-                    modifier = Modifier.fillMaxSize(),
+                    columns = GridCells.Adaptive(minSize = 148.dp), modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 28.dp, top = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     items(visibleFolders, key = { "folder:$it" }) { folder ->
                         FolderCard(folder, pdfs.count { it.folder == folder }) { activeFolder = folder }
                     }
                     items(visiblePdfs, key = { "pdf:${it.uri}" }) { entry ->
-                        DocumentCard(entry.name) { onOpenPdf(Uri.parse(entry.uri), entry.name) }
+                        DocumentCard(entry, onClick = { onOpenPdf(Uri.parse(entry.uri), entry.name) })
                     }
                 }
             }
@@ -219,16 +251,10 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
 
     if (showFolderDialog) {
         AlertDialog(
-            onDismissRequest = { showFolderDialog = false },
-            containerColor = CardBlack,
+            onDismissRequest = { showFolderDialog = false }, containerColor = CardBlack,
             title = { Text("Create folder", color = MainText) },
             text = {
-                OutlinedTextField(
-                    value = folderName,
-                    onValueChange = { folderName = it },
-                    singleLine = true,
-                    placeholder = { Text("Folder name") }
-                )
+                OutlinedTextField(value = folderName, onValueChange = { folderName = it }, singleLine = true, placeholder = { Text("Folder name") })
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -245,16 +271,28 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
 @Composable
 private fun FolderCard(name: String, count: Int, onClick: () -> Unit) {
     Column(
-        Modifier.fillMaxWidth().height(154.dp).clip(RoundedCornerShape(19.dp))
-            .background(CardBlack).border(1.dp, Hairline, RoundedCornerShape(19.dp))
-            .clickable(onClick = onClick).padding(14.dp),
+        Modifier.fillMaxWidth().height(184.dp).clip(RoundedCornerShape(21.dp))
+            .background(Brush.verticalGradient(listOf(Color(0xFF191923), Color(0xFF0B0B0F))))
+            .border(1.dp, Color(0xFF30303B), RoundedCornerShape(21.dp))
+            .clickable(onClick = onClick).padding(13.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Box(
-            Modifier.fillMaxWidth().height(82.dp).clip(RoundedCornerShape(13.dp))
-                .background(Brush.linearGradient(listOf(Color(0xFF20202A), Color(0xFF111116)))),
-            contentAlignment = Alignment.Center
-        ) { Text("▰", color = Accent, fontSize = 34.sp) }
+        Box(Modifier.fillMaxWidth().height(111.dp), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier.align(Alignment.Center).padding(top = 13.dp).fillMaxWidth(0.82f).height(76.dp)
+                    .graphicsLayer { rotationZ = -5f }.shadow(9.dp, RoundedCornerShape(14.dp))
+                    .clip(RoundedCornerShape(14.dp)).background(Color(0xFF252637))
+            )
+            Box(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth(0.91f).height(78.dp)
+                    .shadow(12.dp, RoundedCornerShape(15.dp)).clip(RoundedCornerShape(15.dp))
+                    .background(Brush.linearGradient(listOf(Color(0xFF44465F), Color(0xFF20212E))))
+                    .border(1.dp, Color(0xFF5B5E7B), RoundedCornerShape(15.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("▤", color = Color(0xFFD5D8FF), fontSize = 34.sp)
+            }
+        }
         Column {
             Text(name, color = MainText, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(3.dp))
@@ -264,41 +302,30 @@ private fun FolderCard(name: String, count: Int, onClick: () -> Unit) {
 }
 
 @Composable
-private fun DocumentCard(name: String, onClick: () -> Unit) {
+private fun DocumentCard(entry: PdfEntry, onClick: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val thumbnail by produceState<Bitmap?>(initialValue = null, key1 = entry.uri) {
+        value = withContext(Dispatchers.IO) { createPdfThumbnail(context, entry.uri) }
+    }
     Column(
-        Modifier.fillMaxWidth().height(190.dp).clip(RoundedCornerShape(19.dp))
+        Modifier.fillMaxWidth().height(202.dp).clip(RoundedCornerShape(19.dp))
             .background(CardBlack).border(1.dp, Hairline, RoundedCornerShape(19.dp))
             .clickable(onClick = onClick).padding(11.dp)
     ) {
         Box(
             Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(13.dp))
-                .background(Brush.verticalGradient(listOf(Color(0xFF202020), PreviewBlack))),
-            contentAlignment = Alignment.Center
+                .background(Color(0xFF171717)), contentAlignment = Alignment.Center
         ) {
-            Column(
-                Modifier.fillMaxHeight().fillMaxWidth(0.72f)
-                    .clip(RoundedCornerShape(4.dp)).background(Color(0xFFE8E8E8))
-                    .padding(horizontal = 13.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.Top
-            ) {
-                Box(Modifier.fillMaxWidth(0.42f).height(4.dp).background(Color(0xFF6C789D), RoundedCornerShape(4.dp)))
-                Spacer(Modifier.height(10.dp))
-                repeat(5) { index ->
-                    Box(
-                        Modifier.fillMaxWidth(if (index == 3) 0.68f else 0.94f)
-                            .height(2.dp).background(Color(0xFFB7B7B7), RoundedCornerShape(3.dp))
-                    )
-                    Spacer(Modifier.height(6.dp))
+            if (thumbnail != null) {
+                Image(bitmap = thumbnail!!.asImageBitmap(), contentDescription = "First page of ${entry.name}", modifier = Modifier.fillMaxHeight().fillMaxWidth(0.76f), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+            } else {
+                Box(Modifier.fillMaxHeight().fillMaxWidth(0.72f).clip(RoundedCornerShape(4.dp)).background(Color(0xFFE8E8E8)), contentAlignment = Alignment.Center) {
+                    Text("PDF", color = Color(0xFF6C789D), fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
                 }
             }
-            Box(
-                Modifier.align(Alignment.BottomEnd).padding(9.dp)
-                    .clip(RoundedCornerShape(6.dp)).background(Color(0xFF111111).copy(alpha = 0.9f))
-                    .padding(horizontal = 7.dp, vertical = 4.dp)
-            ) { Text("PDF", color = Accent, fontSize = 8.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp) }
         }
         Spacer(Modifier.height(10.dp))
-        Text(name, color = MainText, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp)
+        Text(entry.name, color = MainText, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 16.sp)
         Spacer(Modifier.height(3.dp))
         Text("PDF DOCUMENT", color = SubText, fontSize = 8.sp, letterSpacing = 1.1.sp)
     }
