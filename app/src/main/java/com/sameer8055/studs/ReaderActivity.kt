@@ -178,8 +178,8 @@ private fun ReaderScreen(uri: Uri, documentName: String) {
     var panX by remember(uri) { mutableFloatStateOf(0f) }
     var panY by remember(uri) { mutableFloatStateOf(0f) }
     var swipeDistance by remember(uri) { mutableFloatStateOf(0f) }
-    var displayedPage by remember(uri) { mutableIntStateOf(-1) }
-    var displayedBitmap by remember(uri) { mutableStateOf<Bitmap?>(null) }
+    var displayedPage by remember(activeUri) { mutableIntStateOf(-1) }
+    var displayedBitmap by remember(activeUri) { mutableStateOf<Bitmap?>(null) }
     var showPagePreviews by remember { mutableStateOf(false) }
 
     fun applyPageEdits(delete: Set<Int> = emptySet(), moveFrom: Int? = null, moveTo: Int? = null) {
@@ -209,7 +209,7 @@ private fun ReaderScreen(uri: Uri, documentName: String) {
             val viewportWidth = with(density) { maxWidth.roundToPx() }.coerceAtLeast(1)
             val viewportHeight = with(density) { maxHeight.roundToPx() }.coerceAtLeast(1)
 
-            LaunchedEffect(uri, page, viewportWidth, viewportHeight) {
+            LaunchedEffect(activeUri, page, viewportWidth, viewportHeight) {
                 // Coalesce quick taps: render the latest requested page, not every skipped page.
                 delay(38)
                 val requestedPage = page
@@ -223,7 +223,7 @@ private fun ReaderScreen(uri: Uri, documentName: String) {
             }
 
             Box(
-                Modifier.fillMaxSize().pointerInput(uri, page, viewportWidth, viewportHeight) {
+                Modifier.fillMaxSize().pointerInput(activeUri, page, viewportWidth, viewportHeight) {
                     detectTransformGestures { centroid, pan, zoomChange, _ ->
                         val previousZoom = zoom
                         val nextZoom = (previousZoom * zoomChange).coerceIn(1f, 5f)
