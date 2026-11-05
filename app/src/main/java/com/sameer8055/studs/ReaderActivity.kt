@@ -182,8 +182,8 @@ private fun ReaderScreen(uri: Uri) {
             }
 
             // Keep the immediate neighbours warm. Page navigation then usually reads from cache.
-            LaunchedEffect(uri, page, viewportWidth, viewportHeight) {
-                withContext(Dispatchers.IO) {
+            LaunchedEffect(uri, page, viewportWidth, viewportHeight, bitmap != null) {
+                if (bitmap != null) withContext(Dispatchers.IO) {
                     if (page > 0) runCatching { pdf.render(page - 1, viewportWidth, viewportHeight) }
                     if (page < pdf.pageCount - 1) runCatching { pdf.render(page + 1, viewportWidth, viewportHeight) }
                 }
