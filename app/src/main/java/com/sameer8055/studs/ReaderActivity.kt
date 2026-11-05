@@ -24,6 +24,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -56,6 +57,7 @@ import kotlinx.coroutines.withContext
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sqrt
+import kotlin.math.roundToInt
 
 private val ReaderBlack = Color(0xFF000000)
 private val ReaderPanel = Color(0xFF111111)
@@ -311,7 +313,8 @@ private fun ReaderScreen(uri: Uri, documentName: String) {
                                     if (selectedPages.isNotEmpty()) selectedPages = if (index in selectedPages) selectedPages - index else selectedPages + index
                                     else { page = index; showPagePreviews = false }
                                 },
-                                onLongClick = { selectedPages = selectedPages + index }
+                                onLongClick = { selectedPages = selectedPages + index },
+                                onMove = { from, to -> applyPageEdits(moveFrom = from, moveTo = to) }
                             )
                         }
                     }
@@ -362,7 +365,8 @@ private fun ReaderScreen(uri: Uri, documentName: String) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PagePreviewItem(pdf: PdfFile, index: Int, selected: Boolean, checked: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun PagePreviewItem(pdf: PdfFile, index: Int, selected: Boolean, checked: Boolean, onClick: () -> Unit, onLongClick: () -> Unit, onMove: (Int, Int) -> Unit) {
+    val pageDensity = LocalDensity.current
     val bitmap by produceState<Bitmap?>(initialValue = null, key1 = pdf, key2 = index) {
         value = withContext(Dispatchers.IO) {
             runCatching { pdf.render(index, 260, 340) }.getOrNull()
@@ -372,7 +376,19 @@ private fun PagePreviewItem(pdf: PdfFile, index: Int, selected: Boolean, checked
         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
             .background(if (checked) Color(0xFF292A38) else Color.Transparent)
             .border(if (checked || selected) 1.dp else 0.dp, if (checked || selected) Color(0xFFC4CEFF) else Color.Transparent, RoundedCornerShape(10.dp))
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(7.dp),
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
+            .pointerInput(index, pdf.pageCount) {
+                var dragDistance = 0f
+                detectDragGesturesAfterLongPress(
+                    onDragStart = { dragDistance = 0f },
+                    onDragEnd = {
+                        val steps = (dragDistance / with(pageDensity) { 150.dp.toPx() }).roundToInt()
+                        if (steps != 0) onMove(index, (index + steps).coerceIn(0, pdf.pageCount - 1))
+                    },
+                    onDragCancel = { dragDistance = 0f },
+                    onDrag = { change, amount -> dragDistance += amount.y; change.consume() }
+                )
+            }.padding(7.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
