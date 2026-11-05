@@ -215,7 +215,7 @@ private fun ReaderScreen(uri: Uri, documentName: String) {
 
             LaunchedEffect(activeUri, page, viewportWidth, viewportHeight) {
                 // Coalesce quick taps: render the latest requested page, not every skipped page.
-                delay(38)
+                delay(16)
                 val requestedPage = page
                 val rendered = withContext(Dispatchers.IO) {
                     runCatching { pdf.render(requestedPage, viewportWidth, viewportHeight) }.getOrNull()
@@ -324,7 +324,7 @@ private fun ReaderScreen(uri: Uri, documentName: String) {
             }
 
             Row(
-                Modifier.align(Alignment.BottomEnd).padding(end = 18.dp, bottom = 22.dp),
+                Modifier.align(Alignment.BottomEnd).padding(end = 18.dp, bottom = 34.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(7.dp)
             ) {
