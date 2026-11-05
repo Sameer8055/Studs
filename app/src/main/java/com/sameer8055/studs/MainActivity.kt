@@ -9,6 +9,7 @@ import android.os.ParcelFileDescriptor
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
@@ -21,6 +22,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -132,6 +134,12 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
     var folderName by remember { mutableStateOf("") }
     var typedBrand by remember { mutableStateOf("") }
     var logoShifted by remember { mutableStateOf(false) }
+    var selectedPdfs by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var renameTarget by remember { mutableStateOf<PdfEntry?>(null) }
+    var renameValue by remember { mutableStateOf("") }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = activeFolder != null) { activeFolder = null }
 
     LaunchedEffect(Unit) {
         delay(180)
@@ -219,6 +227,22 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
             }
 
             Spacer(Modifier.height(20.dp))
+            if (selectedPdfs.isNotEmpty()) {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFF171717))
+                        .border(1.dp, Hairline, RoundedCornerShape(14.dp)).padding(horizontal = 12.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("${selectedPdfs.size} selected", color = MainText, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    if (selectedPdfs.size == 1) TextButton(onClick = {
+                        renameTarget = pdfs.firstOrNull { it.uri in selectedPdfs }
+                        renameValue = renameTarget?.name.orEmpty()
+                    }) { Text("Rename", color = Accent) }
+                    TextButton(onClick = { showDeleteConfirm = true }) { Text("Delete", color = Color(0xFFFF8C8C)) }
+                    TextButton(onClick = { selectedPdfs = emptySet() }) { Text("Cancel", color = SubText) }
+                }
+                Spacer(Modifier.height(10.dp))
+            }
             if (visibleFolders.isEmpty() && visiblePdfs.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -242,11 +266,48 @@ private fun StudsHome(onOpenPdf: (Uri, String) -> Unit) {
                         FolderCard(folder, pdfs.count { it.folder == folder }) { activeFolder = folder }
                     }
                     items(visiblePdfs, key = { "pdf:${it.uri}" }) { entry ->
-                        DocumentCard(entry, onClick = { onOpenPdf(Uri.parse(entry.uri), entry.name) })
+                        DocumentCard(
+                            entry,
+                            selected = entry.uri in selectedPdfs,
+                            onClick = {
+                                if (selectedPdfs.isNotEmpty()) selectedPdfs = if (entry.uri in selectedPdfs) selectedPdfs - entry.uri else selectedPdfs + entry.uri
+                                else onOpenPdf(Uri.parse(entry.uri), entry.name)
+                            },
+                            onLongClick = { selectedPdfs = selectedPdfs + entry.uri }
+                        )
                     }
                 }
             }
         }
+    }
+
+    if (renameTarget != null) {
+        AlertDialog(
+            onDismissRequest = { renameTarget = null }, containerColor = CardBlack,
+            title = { Text("Rename PDF", color = MainText) },
+            text = { OutlinedTextField(value = renameValue, onValueChange = { renameValue = it }, singleLine = true) },
+            confirmButton = { TextButton(onClick = {
+                val target = renameTarget
+                val newName = renameValue.trim()
+                if (target != null && newName.isNotEmpty()) saveLibrary(pdfs.map { if (it.uri == target.uri) it.copy(name = newName) else it }, folders)
+                renameTarget = null
+                selectedPdfs = emptySet()
+            }) { Text("Save", color = Accent) } },
+            dismissButton = { TextButton(onClick = { renameTarget = null }) { Text("Cancel", color = SubText) } }
+        )
+    }
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false }, containerColor = CardBlack,
+            title = { Text("Delete ${selectedPdfs.size} PDF${if (selectedPdfs.size == 1) "" else "s"}?", color = MainText) },
+            text = { Text("The selected files will be removed from your Studs library.", color = SubText) },
+            confirmButton = { TextButton(onClick = {
+                saveLibrary(pdfs.filterNot { it.uri in selectedPdfs }, folders)
+                selectedPdfs = emptySet()
+                showDeleteConfirm = false
+            }) { Text("Delete", color = Color(0xFFFF8C8C)) } },
+            dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel", color = SubText) } }
+        )
     }
 
     if (showFolderDialog) {
@@ -302,15 +363,16 @@ private fun FolderCard(name: String, count: Int, onClick: () -> Unit) {
 }
 
 @Composable
-private fun DocumentCard(entry: PdfEntry, onClick: () -> Unit) {
+private fun DocumentCard(entry: PdfEntry, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val thumbnail by produceState<Bitmap?>(initialValue = null, key1 = entry.uri) {
         value = withContext(Dispatchers.IO) { createPdfThumbnail(context, entry.uri) }
     }
     Column(
         Modifier.fillMaxWidth().height(202.dp).clip(RoundedCornerShape(19.dp))
-            .background(CardBlack).border(1.dp, Hairline, RoundedCornerShape(19.dp))
-            .clickable(onClick = onClick).padding(11.dp)
+            .background(if (selected) Color(0xFF202235) else CardBlack)
+            .border(if (selected) 1.5.dp else 1.dp, if (selected) Accent else Hairline, RoundedCornerShape(19.dp))
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick).padding(11.dp)
     ) {
         Box(
             Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(13.dp))
