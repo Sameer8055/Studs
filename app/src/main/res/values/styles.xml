@@ -9,8 +9,8 @@
     </style>
     <style name="Theme.Studs.Splash" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/studs_black</item>
-        <item name="windowSplashScreenAnimatedIcon">@drawable/studs_splash_animated</item>
-        <item name="windowSplashScreenAnimationDuration">700</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/studs_logo</item>
+        <item name="windowSplashScreenAnimationDuration">450</item>
         <item name="postSplashScreenTheme">@style/Theme.Studs</item>
     </style>
 </resources>
